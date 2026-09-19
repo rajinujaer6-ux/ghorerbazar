@@ -1,0 +1,6 @@
+{
+  "name": "Ghorer Bazar - Organic & Natural Grocery",
+  "description": "Premium e-commerce platform for organic grocery, wild honey, cold-pressed oils, pure ghee, dates, spices, order tracking, and store management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
