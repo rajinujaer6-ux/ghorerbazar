@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions for security and hacker prevention
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAuthorizedAdmin() {
+      return isAuthenticated() && 
+        (request.auth.token.email == 'rajinujaer6@gmail.com' ||
+         request.auth.uid == 'admin_rajinujaer6');
+    }
+
+    // Products collection: public read, only admin can write
+    match /products/{productId} {
+      allow read: if true;
+      allow create, update, delete: if isAuthorizedAdmin();
+    }
+
+    // Orders collection: clients can create valid orders, only admin or order owner can read/update
+    match /orders/{orderId} {
+      allow read: if isAuthorizedAdmin() || 
+        (isAuthenticated() && resource.data.customer.userId == request.auth.uid);
+      allow create: if request.resource.data.total > 0 && 
+        request.resource.data.customer.name is string &&
+        request.resource.data.customer.phone is string;
+      allow update, delete: if isAuthorizedAdmin();
+    }
+
+    // Coupons collection: public read (to validate coupons), only admin can manage
+    match /coupons/{couponId} {
+      allow read: if true;
+      allow write: if isAuthorizedAdmin();
+    }
+
+    // Store Settings: public read, only admin can update
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAuthorizedAdmin();
+    }
+
+    // Customer / User Profiles: user can manage their own, admin has full access
+    match /users/{userId} {
+      allow read, write: if isAuthorizedAdmin() || (isAuthenticated() && request.auth.uid == userId);
+    }
+  }
+}

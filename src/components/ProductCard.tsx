@@ -67,6 +67,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onNavigate })
           src={product.thumbnail || product.images[0]}
           alt={product.name}
           loading="lazy"
+          decoding="async"
           className="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform duration-500"
         />
 

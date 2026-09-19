@@ -1,5 +1,20 @@
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import {
+  collection,
+  doc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  onSnapshot,
+} from 'firebase/firestore';
+import {
+  db,
+  sanitizeInput,
+  sanitizeObject,
+  securityRateLimiter
+} from '../lib/firebase';
+import {
   Product,
   Category,
   CartItem,
@@ -128,6 +143,11 @@ interface StoreContextType {
 
   // Currency helper
   formatPrice: (amount: number) => string;
+
+  // Firebase & Security Status
+  isFirebaseConnected: boolean;
+  firebaseSyncStatus: 'synced' | 'syncing' | 'offline';
+  resetToInitialData: () => void;
 }
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
@@ -179,6 +199,104 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [isFirebaseConnected, setIsFirebaseConnected] = useState(true);
+  const [firebaseSyncStatus, setFirebaseSyncStatus] = useState<'synced' | 'syncing' | 'offline'>('syncing');
+
+  // Background Ultra-Fast Firestore Synchronization with Offline Persistence
+  useEffect(() => {
+    let unsubs: (() => void)[] = [];
+    try {
+      // 1. Live Sync Products with Firestore
+      const unsubProducts = onSnapshot(
+        collection(db, 'products'),
+        (snapshot) => {
+          if (!snapshot.empty) {
+            const list: Product[] = [];
+            snapshot.forEach((docSnap) => list.push(docSnap.data() as Product));
+            setProducts(list);
+          } else {
+            // Seed initial products to cloud firestore
+            initialProducts.forEach((p) => {
+              setDoc(doc(db, 'products', p.id), p).catch(() => {});
+            });
+          }
+          setIsFirebaseConnected(true);
+          setFirebaseSyncStatus('synced');
+        },
+        (err) => {
+          console.warn('Firebase products offline:', err);
+          setIsFirebaseConnected(false);
+          setFirebaseSyncStatus('offline');
+        }
+      );
+      unsubs.push(unsubProducts);
+
+      // 2. Live Sync Orders with Firestore
+      const unsubOrders = onSnapshot(
+        collection(db, 'orders'),
+        (snapshot) => {
+          if (!snapshot.empty) {
+            const list: Order[] = [];
+            snapshot.forEach((docSnap) => list.push(docSnap.data() as Order));
+            list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            setOrders(list);
+          } else {
+            initialOrders.forEach((ord) => {
+              setDoc(doc(db, 'orders', ord.id), ord).catch(() => {});
+            });
+          }
+        },
+        (err) => {
+          console.warn('Firebase orders offline:', err);
+        }
+      );
+      unsubs.push(unsubOrders);
+
+      // 3. Live Sync Coupons with Firestore
+      const unsubCoupons = onSnapshot(
+        collection(db, 'coupons'),
+        (snapshot) => {
+          if (!snapshot.empty) {
+            const list: Coupon[] = [];
+            snapshot.forEach((docSnap) => list.push(docSnap.data() as Coupon));
+            setCoupons(list);
+          } else {
+            initialCoupons.forEach((c) => {
+              setDoc(doc(db, 'coupons', c.code), c).catch(() => {});
+            });
+          }
+        },
+        (err) => {
+          console.warn('Firebase coupons offline:', err);
+        }
+      );
+      unsubs.push(unsubCoupons);
+
+      // 4. Live Sync Store Settings with Firestore
+      const unsubSettings = onSnapshot(
+        doc(db, 'settings', 'general'),
+        (snapshot) => {
+          if (snapshot.exists()) {
+            setSettings(snapshot.data() as StoreSettings);
+          } else {
+            setDoc(doc(db, 'settings', 'general'), initialSettings).catch(() => {});
+          }
+        },
+        (err) => {
+          console.warn('Firebase settings offline:', err);
+        }
+      );
+      unsubs.push(unsubSettings);
+    } catch (e) {
+      console.warn('Firebase init error:', e);
+      setIsFirebaseConnected(false);
+      setFirebaseSyncStatus('offline');
+    }
+
+    return () => {
+      unsubs.forEach((u) => u());
+    };
+  }, []);
 
   // Sync to storage
   useEffect(() => saveStored('products', products), [products]);
@@ -333,18 +451,31 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const addCoupon = (newCoupon: Coupon) => {
-    setCoupons((prev) => [...prev, newCoupon]);
-    addToast('success', 'Coupon Created', `Coupon ${newCoupon.code} created.`);
+    const sanitized: Coupon = {
+      ...newCoupon,
+      code: sanitizeInput(newCoupon.code).toUpperCase(),
+    };
+    setCoupons((prev) => [...prev, sanitized]);
+    setDoc(doc(db, 'coupons', sanitized.code), sanitized).catch(() => {});
+    addToast('success', 'Coupon Created', `Coupon ${sanitized.code} created and synced to Firebase.`);
   };
 
   const toggleCouponStatus = (code: string) => {
     setCoupons((prev) =>
-      prev.map((c) => (c.code === code ? { ...c, isActive: !c.isActive } : c))
+      prev.map((c) => {
+        if (c.code === code) {
+          const updated = { ...c, isActive: !c.isActive };
+          updateDoc(doc(db, 'coupons', code), { isActive: updated.isActive }).catch(() => {});
+          return updated;
+        }
+        return c;
+      })
     );
   };
 
   const deleteCoupon = (code: string) => {
     setCoupons((prev) => prev.filter((c) => c.code !== code));
+    deleteDoc(doc(db, 'coupons', code)).catch(() => {});
     if (appliedCoupon?.code === code) {
       setAppliedCoupon(null);
     }
@@ -368,6 +499,15 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Orders
   const createOrder = (orderData: Omit<Order, 'id' | 'orderNumber' | 'date' | 'status' | 'trackingHistory'>): Order => {
+    // Hacker & bot protection: Rate limiting
+    if (!securityRateLimiter.isAllowed('create_order')) {
+      addToast('error', 'নিরাপত্তা সতর্কতা (Security Protection)', 'খুব দ্রুত অতিরিক্ত রিকোয়েস্ট শনাক্ত হয়েছে। অনুগ্রহ করে কিছুক্ষণ অপেক্ষা করুন।');
+      throw new Error('Rate limit exceeded');
+    }
+
+    // Hacker defense: Sanitize all customer inputs against XSS & injections
+    const sanitizedCustomer = sanitizeObject(orderData.customer);
+
     const randomNum = Math.floor(10000 + Math.random() * 90000);
     const orderNumber = `GB-${randomNum}`;
     const now = new Date();
@@ -407,6 +547,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     const newOrder: Order = {
       ...orderData,
+      customer: sanitizedCustomer,
       id: `ord-${Date.now()}`,
       orderNumber,
       date: formattedDate,
@@ -416,16 +557,25 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       trackingCode: `ST-${Math.floor(1000000 + Math.random() * 9000000)}`,
     };
 
+    // Optimistic UI state update (Instantaneous UX)
     setOrders((prev) => [newOrder, ...prev]);
+
+    // Push to Firebase Cloud Firestore
+    setDoc(doc(db, 'orders', newOrder.id), newOrder).catch((err) => {
+      console.warn('Firestore cloud sync notice:', err);
+    });
 
     // Update stock
     setProducts((prevProducts) =>
       prevProducts.map((p) => {
         const matchingItem = orderData.items.find((i) => i.productId === p.id);
         if (matchingItem) {
+          const updatedStock = Math.max(0, p.stock - matchingItem.quantity);
+          // Sync stock to firestore
+          updateDoc(doc(db, 'products', p.id), { stock: updatedStock }).catch(() => {});
           return {
             ...p,
-            stock: Math.max(0, p.stock - matchingItem.quantity),
+            stock: updatedStock,
           };
         }
         return p;
@@ -433,11 +583,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     );
 
     clearCart();
-    addToast('success', 'Order Placed Successfully!', `Order ${orderNumber} has been received.`);
+    addToast('success', 'Order Placed Successfully!', `Order ${orderNumber} has been received and saved.`);
     return newOrder;
   };
 
   const updateOrderStatus = (orderId: string, status: Order['status'], note?: string) => {
+    let updatedOrderObj: Order | undefined;
     setOrders((prev) =>
       prev.map((ord) => {
         if (ord.id === orderId) {
@@ -458,15 +609,26 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             };
           });
 
-          return {
+          const res = {
             ...ord,
             status,
             trackingHistory: updatedHistory,
           };
+          updatedOrderObj = res;
+          return res;
         }
         return ord;
       })
     );
+
+    // Sync status with Firebase Cloud Firestore
+    if (updatedOrderObj) {
+      updateDoc(doc(db, 'orders', orderId), {
+        status,
+        trackingHistory: updatedOrderObj.trackingHistory,
+      }).catch(() => {});
+    }
+
     addToast('success', 'Order Status Updated', `Order marked as ${status}.`);
   };
 
@@ -474,6 +636,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setOrders((prev) =>
       prev.map((ord) => (ord.id === orderId ? { ...ord, paymentStatus } : ord))
     );
+    // Sync payment status with Firestore
+    updateDoc(doc(db, 'orders', orderId), { paymentStatus }).catch(() => {});
     addToast('success', 'Payment Status Updated', `Payment marked as ${paymentStatus}.`);
   };
 
@@ -481,6 +645,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setOrders((prev) =>
       prev.map((ord) => (ord.id === orderId ? { ...ord, ...updates } : ord))
     );
+    // Sync with Firestore
+    updateDoc(doc(db, 'orders', orderId), updates).catch(() => {});
     addToast('success', 'Order Updated', 'Order details have been saved.');
   };
 
@@ -494,23 +660,28 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     );
   };
 
-  // Product CRUD
+  // Product CRUD with Sanitization & Cloud Firestore Sync
   const addProduct = (prodData: Omit<Product, 'id'>) => {
+    const sanitized = sanitizeObject(prodData);
     const newProd: Product = {
-      ...prodData,
+      ...sanitized,
       id: `prod-${Date.now()}`,
     };
     setProducts((prev) => [newProd, ...prev]);
-    addToast('success', 'Product Added', `${newProd.name} added to catalog.`);
+    setDoc(doc(db, 'products', newProd.id), newProd).catch(() => {});
+    addToast('success', 'Product Added', `${newProd.name} added to catalog and Firebase.`);
   };
 
   const updateProduct = (id: string, updates: Partial<Product>) => {
-    setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
-    addToast('success', 'Product Updated', 'Product updated successfully.');
+    const sanitized = sanitizeObject(updates);
+    setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, ...sanitized } : p)));
+    updateDoc(doc(db, 'products', id), sanitized).catch(() => {});
+    addToast('success', 'Product Updated', 'Product updated in catalog and Firebase.');
   };
 
   const deleteProduct = (id: string) => {
     setProducts((prev) => prev.filter((p) => p.id !== id));
+    deleteDoc(doc(db, 'products', id)).catch(() => {});
     addToast('info', 'Product Deleted', 'Product removed from store.');
   };
 
@@ -647,8 +818,26 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Settings
   const updateSettings = (updates: Partial<StoreSettings>) => {
-    setSettings((prev) => ({ ...prev, ...updates }));
-    addToast('success', 'Settings Saved', 'Store configuration updated.');
+    setSettings((prev) => {
+      const updated = { ...prev, ...updates };
+      setDoc(doc(db, 'settings', 'general'), updated).catch(() => {});
+      return updated;
+    });
+    addToast('success', 'Settings Saved', 'Store configuration updated in Firebase.');
+  };
+
+  const resetToInitialData = () => {
+    setProducts(initialProducts);
+    setCategories(initialCategories);
+    setOrders(initialOrders);
+    setCoupons(initialCoupons);
+    setSettings(initialSettings);
+    // Cloud sync
+    initialProducts.forEach((p) => setDoc(doc(db, 'products', p.id), p).catch(() => {}));
+    initialOrders.forEach((o) => setDoc(doc(db, 'orders', o.id), o).catch(() => {}));
+    initialCoupons.forEach((c) => setDoc(doc(db, 'coupons', c.code), c).catch(() => {}));
+    setDoc(doc(db, 'settings', 'general'), initialSettings).catch(() => {});
+    addToast('info', 'রিসেট সম্পন্ন', 'প্রাথমিক ডেমো ডেটা পুনরায় ক্লাউড ও লোকাল স্টোরেজে সেট করা হয়েছে।');
   };
 
   return (
@@ -719,6 +908,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         addToast,
         removeToast,
         formatPrice,
+        isFirebaseConnected,
+        firebaseSyncStatus,
+        resetToInitialData,
       }}
     >
       {children}

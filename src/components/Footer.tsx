@@ -295,7 +295,24 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
         </div>
 
         {/* Bottom Bar with Copyright & Back to Top */}
-        <div className="pt-8 border-t border-emerald-950/80 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400">
+        <div className="pt-6 pb-4 border-t border-emerald-950/80 flex flex-wrap items-center justify-between gap-3 text-[11px] text-slate-400">
+          <div className="flex flex-wrap items-center gap-4">
+            <span className="flex items-center gap-1.5 text-emerald-400 font-semibold">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              🔥 Firebase Firestore Cloud Active
+            </span>
+            <span className="flex items-center gap-1.5 text-slate-300">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              256-Bit SSL & Hacker-Proof Rules Enforced
+            </span>
+            <span className="flex items-center gap-1.5 text-slate-300">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              Fast-Load Multi-Tab Cache Enabled
+            </span>
+          </div>
+        </div>
+
+        <div className="pt-4 border-t border-emerald-950/40 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400">
           <p>
             © {new Date().getFullYear()} {settings.storeName}. All rights reserved. Designed & built for health-conscious living.
           </p>

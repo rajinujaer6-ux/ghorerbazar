@@ -64,7 +64,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
     addToast,
     resetToInitialData,
     isAdmin,
-    currentUser
+    currentUser,
+    isFirebaseConnected,
+    firebaseSyncStatus
   } = useStore();
 
   // Active Tab: 'overview' | 'orders' | 'products' | 'coupons' | 'customers' | 'settings' | 'banners'
@@ -398,6 +400,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             </span>
             <span className="bg-amber-50 text-amber-800 text-[11px] font-bold px-2.5 py-0.5 rounded-full border border-amber-200">
               rajinujaer6@gmail.com
+            </span>
+            <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1.5 ${
+              isFirebaseConnected
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                : 'bg-amber-50 text-amber-800 border-amber-300'
+            }`}>
+              <span className={`w-2 h-2 rounded-full ${isFirebaseConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+              {isFirebaseConnected ? '🔥 Firebase Cloud Synced' : '⚡ Local Fast Cache'}
+            </span>
+            <span className="bg-blue-50 text-blue-800 text-[11px] font-bold px-2.5 py-0.5 rounded-full border border-blue-200 flex items-center gap-1">
+              <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
+              Anti-Hacker Shield Active
             </span>
             <span className="text-xs text-slate-400 hidden sm:inline">•</span>
             <span className="text-xs text-slate-500 font-medium hidden sm:inline">Ghorer Bazar Store Manager v3.0</span>

@@ -1,0 +1,45 @@
+{
+  "entities": {
+    "products": {
+      "fields": {
+        "name": { "type": "string" },
+        "bengaliName": { "type": "string" },
+        "category": { "type": "string" },
+        "price": { "type": "number" },
+        "originalPrice": { "type": "number" },
+        "stock": { "type": "number" },
+        "thumbnail": { "type": "string" },
+        "isFeatured": { "type": "boolean" },
+        "sku": { "type": "string" }
+      }
+    },
+    "orders": {
+      "fields": {
+        "orderNumber": { "type": "string" },
+        "date": { "type": "string" },
+        "customer": { "type": "map" },
+        "items": { "type": "array" },
+        "total": { "type": "number" },
+        "status": { "type": "string" },
+        "paymentMethod": { "type": "string" },
+        "paymentStatus": { "type": "string" }
+      }
+    },
+    "coupons": {
+      "fields": {
+        "code": { "type": "string" },
+        "type": { "type": "string" },
+        "value": { "type": "number" },
+        "isActive": { "type": "boolean" }
+      }
+    },
+    "settings": {
+      "fields": {
+        "storeName": { "type": "string" },
+        "deliveryChargeDhaka": { "type": "number" },
+        "deliveryChargeOutside": { "type": "number" },
+        "contactPhone": { "type": "string" }
+      }
+    }
+  }
+}
