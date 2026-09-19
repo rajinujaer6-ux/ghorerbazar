@@ -204,6 +204,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Background Ultra-Fast Firestore Synchronization with Offline Persistence
   useEffect(() => {
+    if (!db) {
+      setIsFirebaseConnected(false);
+      setFirebaseSyncStatus('offline');
+      return;
+    }
+
     let unsubs: (() => void)[] = [];
     try {
       // 1. Live Sync Products with Firestore
@@ -456,7 +462,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       code: sanitizeInput(newCoupon.code).toUpperCase(),
     };
     setCoupons((prev) => [...prev, sanitized]);
-    setDoc(doc(db, 'coupons', sanitized.code), sanitized).catch(() => {});
+    if (db) setDoc(doc(db, 'coupons', sanitized.code), sanitized).catch(() => {});
     addToast('success', 'Coupon Created', `Coupon ${sanitized.code} created and synced to Firebase.`);
   };
 
@@ -465,7 +471,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       prev.map((c) => {
         if (c.code === code) {
           const updated = { ...c, isActive: !c.isActive };
-          updateDoc(doc(db, 'coupons', code), { isActive: updated.isActive }).catch(() => {});
+          if (db) updateDoc(doc(db, 'coupons', code), { isActive: updated.isActive }).catch(() => {});
           return updated;
         }
         return c;
@@ -475,7 +481,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const deleteCoupon = (code: string) => {
     setCoupons((prev) => prev.filter((c) => c.code !== code));
-    deleteDoc(doc(db, 'coupons', code)).catch(() => {});
+    if (db) deleteDoc(doc(db, 'coupons', code)).catch(() => {});
     if (appliedCoupon?.code === code) {
       setAppliedCoupon(null);
     }
@@ -561,9 +567,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setOrders((prev) => [newOrder, ...prev]);
 
     // Push to Firebase Cloud Firestore
-    setDoc(doc(db, 'orders', newOrder.id), newOrder).catch((err) => {
-      console.warn('Firestore cloud sync notice:', err);
-    });
+    if (db) {
+      setDoc(doc(db, 'orders', newOrder.id), newOrder).catch((err) => {
+        console.warn('Firestore cloud sync notice:', err);
+      });
+    }
 
     // Update stock
     setProducts((prevProducts) =>
@@ -572,7 +580,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (matchingItem) {
           const updatedStock = Math.max(0, p.stock - matchingItem.quantity);
           // Sync stock to firestore
-          updateDoc(doc(db, 'products', p.id), { stock: updatedStock }).catch(() => {});
+          if (db) updateDoc(doc(db, 'products', p.id), { stock: updatedStock }).catch(() => {});
           return {
             ...p,
             stock: updatedStock,
@@ -622,7 +630,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     );
 
     // Sync status with Firebase Cloud Firestore
-    if (updatedOrderObj) {
+    if (db && updatedOrderObj) {
       updateDoc(doc(db, 'orders', orderId), {
         status,
         trackingHistory: updatedOrderObj.trackingHistory,
@@ -637,7 +645,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       prev.map((ord) => (ord.id === orderId ? { ...ord, paymentStatus } : ord))
     );
     // Sync payment status with Firestore
-    updateDoc(doc(db, 'orders', orderId), { paymentStatus }).catch(() => {});
+    if (db) updateDoc(doc(db, 'orders', orderId), { paymentStatus }).catch(() => {});
     addToast('success', 'Payment Status Updated', `Payment marked as ${paymentStatus}.`);
   };
 
@@ -646,7 +654,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       prev.map((ord) => (ord.id === orderId ? { ...ord, ...updates } : ord))
     );
     // Sync with Firestore
-    updateDoc(doc(db, 'orders', orderId), updates).catch(() => {});
+    if (db) updateDoc(doc(db, 'orders', orderId), updates).catch(() => {});
     addToast('success', 'Order Updated', 'Order details have been saved.');
   };
 
@@ -668,20 +676,20 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       id: `prod-${Date.now()}`,
     };
     setProducts((prev) => [newProd, ...prev]);
-    setDoc(doc(db, 'products', newProd.id), newProd).catch(() => {});
+    if (db) setDoc(doc(db, 'products', newProd.id), newProd).catch(() => {});
     addToast('success', 'Product Added', `${newProd.name} added to catalog and Firebase.`);
   };
 
   const updateProduct = (id: string, updates: Partial<Product>) => {
     const sanitized = sanitizeObject(updates);
     setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, ...sanitized } : p)));
-    updateDoc(doc(db, 'products', id), sanitized).catch(() => {});
+    if (db) updateDoc(doc(db, 'products', id), sanitized).catch(() => {});
     addToast('success', 'Product Updated', 'Product updated in catalog and Firebase.');
   };
 
   const deleteProduct = (id: string) => {
     setProducts((prev) => prev.filter((p) => p.id !== id));
-    deleteDoc(doc(db, 'products', id)).catch(() => {});
+    if (db) deleteDoc(doc(db, 'products', id)).catch(() => {});
     addToast('info', 'Product Deleted', 'Product removed from store.');
   };
 
@@ -820,7 +828,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const updateSettings = (updates: Partial<StoreSettings>) => {
     setSettings((prev) => {
       const updated = { ...prev, ...updates };
-      setDoc(doc(db, 'settings', 'general'), updated).catch(() => {});
+      if (db) setDoc(doc(db, 'settings', 'general'), updated).catch(() => {});
       return updated;
     });
     addToast('success', 'Settings Saved', 'Store configuration updated in Firebase.');
@@ -833,10 +841,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCoupons(initialCoupons);
     setSettings(initialSettings);
     // Cloud sync
-    initialProducts.forEach((p) => setDoc(doc(db, 'products', p.id), p).catch(() => {}));
-    initialOrders.forEach((o) => setDoc(doc(db, 'orders', o.id), o).catch(() => {}));
-    initialCoupons.forEach((c) => setDoc(doc(db, 'coupons', c.code), c).catch(() => {}));
-    setDoc(doc(db, 'settings', 'general'), initialSettings).catch(() => {});
+    if (db) {
+      initialProducts.forEach((p) => setDoc(doc(db, 'products', p.id), p).catch(() => {}));
+      initialOrders.forEach((o) => setDoc(doc(db, 'orders', o.id), o).catch(() => {}));
+      initialCoupons.forEach((c) => setDoc(doc(db, 'coupons', c.code), c).catch(() => {}));
+      setDoc(doc(db, 'settings', 'general'), initialSettings).catch(() => {});
+    }
     addToast('info', 'রিসেট সম্পন্ন', 'প্রাথমিক ডেমো ডেটা পুনরায় ক্লাউড ও লোকাল স্টোরেজে সেট করা হয়েছে।');
   };
 

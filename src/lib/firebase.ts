@@ -1,54 +1,74 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
+import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import {
   getFirestore,
   initializeFirestore,
   persistentLocalCache,
   persistentMultipleTabManager,
-  collection,
-  doc,
-  getDocs,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  onSnapshot,
-  query,
-  limit
+  Firestore,
 } from 'firebase/firestore';
-import { getAuth, signInAnonymously } from 'firebase/auth';
+import { getAuth, Auth } from 'firebase/auth';
 import firebaseConfigData from '../../firebase-applet-config.json';
 
+const rawConfig: Record<string, any> = (firebaseConfigData as Record<string, any>) || {};
+const metaEnv = ((import.meta as any).env as Record<string, any>) || {};
+
 const firebaseConfig = {
-  projectId: firebaseConfigData.projectId,
-  appId: firebaseConfigData.appId,
-  apiKey: firebaseConfigData.apiKey,
-  authDomain: firebaseConfigData.authDomain,
-  storageBucket: firebaseConfigData.storageBucket,
-  messagingSenderId: firebaseConfigData.messagingSenderId,
+  projectId: metaEnv.VITE_FIREBASE_PROJECT_ID || rawConfig.projectId || 'gen-lang-client-0958462212',
+  appId: metaEnv.VITE_FIREBASE_APP_ID || rawConfig.appId || '1:768466059989:web:a03712c953d93e477d185c',
+  apiKey: metaEnv.VITE_FIREBASE_API_KEY || rawConfig.apiKey || 'AIzaSyDJwQUhfSDRLop-foFC9caQcFXLd78IAgY',
+  authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || rawConfig.authDomain || 'gen-lang-client-0958462212.firebaseapp.com',
+  storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || rawConfig.storageBucket || 'gen-lang-client-0958462212.firebasestorage.app',
+  messagingSenderId: metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || rawConfig.messagingSenderId || '768466059989',
 };
 
-// 1. Initialize Firebase App (Singleton Pattern)
-export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+const databaseId =
+  metaEnv.VITE_FIREBASE_DATABASE_ID ||
+  rawConfig.firestoreDatabaseId ||
+  'ai-studio-ghorerbazarorgan-df725839-71ed-499a-8189-b9f909604a67';
 
-// 2. High-Speed Firestore with Multi-Tab Offline Persistent Cache
-// This gives near-instant (<50ms) load time on repeat visits and smooth offline capabilities!
-let dbInstance;
+// 1. Safe Singleton Firebase App Initialization
+let appInstance: FirebaseApp | null = null;
 try {
-  dbInstance = initializeFirestore(
-    app,
-    {
-      localCache: persistentLocalCache({
-        tabManager: persistentMultipleTabManager(),
-      }),
-    },
-    firebaseConfigData.firestoreDatabaseId || '(default)'
-  );
+  appInstance = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 } catch (e) {
-  // Fallback if already initialized
-  dbInstance = getFirestore(app, firebaseConfigData.firestoreDatabaseId || undefined);
+  console.warn('Firebase app init notice (fallback to local state):', e);
 }
 
+// 2. Safe High-Speed Firestore Initialization
+let dbInstance: Firestore | null = null;
+if (appInstance) {
+  try {
+    dbInstance = initializeFirestore(
+      appInstance,
+      {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager(),
+        }),
+      },
+      databaseId || '(default)'
+    );
+  } catch (e) {
+    try {
+      dbInstance = getFirestore(appInstance, databaseId || undefined);
+    } catch (err2) {
+      console.warn('Firestore initialization fallback:', err2);
+    }
+  }
+}
+
+// 3. Safe Auth
+let authInstance: Auth | null = null;
+if (appInstance) {
+  try {
+    authInstance = getAuth(appInstance);
+  } catch (e) {
+    console.warn('Firebase Auth notice:', e);
+  }
+}
+
+export const app = appInstance;
 export const db = dbInstance;
-export const auth = getAuth(app);
+export const auth = authInstance;
 
 // Hacker Protection: Input Sanitization Utility against XSS & Injection attacks
 export const sanitizeInput = (input: string): string => {
